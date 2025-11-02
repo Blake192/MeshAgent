@@ -168,8 +168,12 @@ void ILibSimpleDataStore_CachedEx(ILibSimpleDataStore dataStore, char* key, size
 		ILibSimpleDataStore_SHA384(value, valueLen, entry->valueHash);   
 	}
 	
-	ILibHashtable_Put(root->cacheTable, NULL, key, (int)keyLen, entry); // No loss of data, becuase capped at INT32_MAX
-	if (vhash != NULL) { ILibMemory_Free(key); }
+        void *oldEntry = ILibHashtable_Put(root->cacheTable, NULL, key, (int)keyLen, entry); // No loss of data, becuase capped at INT32_MAX
+        if (oldEntry != NULL)
+        {
+                ILibMemory_Free(oldEntry);
+        }
+        if (vhash != NULL) { ILibMemory_Free(key); }
 }
 
 typedef struct ILibSimpleDateStore_JSONCache

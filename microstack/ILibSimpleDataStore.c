@@ -154,9 +154,14 @@ void ILibSimpleDataStore_CachedEx(ILibSimpleDataStore dataStore, char* key, size
 			}
 		}
 	}
-	ILibSimpleDataStore_Root *root = (ILibSimpleDataStore_Root*)dataStore;
-	if (root->cacheTable == NULL) { root->cacheTable = ILibHashtable_Create(); }
-	ILibSimpleDataStore_CacheEntry *entry = (ILibSimpleDataStore_CacheEntry*)ILibMemory_Allocate((int)(sizeof(ILibSimpleDataStore_CacheEntry) + valueLen), 0, NULL, NULL);
+        ILibSimpleDataStore_Root *root = (ILibSimpleDataStore_Root*)dataStore;
+        if (root->cacheTable == NULL) { root->cacheTable = ILibHashtable_Create(); }
+        ILibSimpleDataStore_CacheEntry *oldEntry = (ILibSimpleDataStore_CacheEntry*)ILibHashtable_Remove(root->cacheTable, NULL, key, (int)keyLen);
+        if (oldEntry != NULL)
+        {
+                free(oldEntry);
+        }
+        ILibSimpleDataStore_CacheEntry *entry = (ILibSimpleDataStore_CacheEntry*)ILibMemory_Allocate((int)(sizeof(ILibSimpleDataStore_CacheEntry) + valueLen), 0, NULL, NULL);
 	entry->valueLength = (int)valueLen; // No loss of data, becuase it's capped to INT32_MAX
 	if (valueLen > 0) { memcpy_s(entry->value, valueLen, value, valueLen); }
 	if (vhash != NULL)

@@ -154,9 +154,14 @@ void ILibSimpleDataStore_CachedEx(ILibSimpleDataStore dataStore, char* key, size
 			}
 		}
 	}
-	ILibSimpleDataStore_Root *root = (ILibSimpleDataStore_Root*)dataStore;
-	if (root->cacheTable == NULL) { root->cacheTable = ILibHashtable_Create(); }
-	ILibSimpleDataStore_CacheEntry *entry = (ILibSimpleDataStore_CacheEntry*)ILibMemory_Allocate((int)(sizeof(ILibSimpleDataStore_CacheEntry) + valueLen), 0, NULL, NULL);
+        ILibSimpleDataStore_Root *root = (ILibSimpleDataStore_Root*)dataStore;
+        if (root->cacheTable == NULL) { root->cacheTable = ILibHashtable_Create(); }
+        ILibSimpleDataStore_CacheEntry *oldEntry = (ILibSimpleDataStore_CacheEntry*)ILibHashtable_Remove(root->cacheTable, NULL, key, (int)keyLen);
+        if (oldEntry != NULL)
+        {
+                free(oldEntry);
+        }
+        ILibSimpleDataStore_CacheEntry *entry = (ILibSimpleDataStore_CacheEntry*)ILibMemory_Allocate((int)(sizeof(ILibSimpleDataStore_CacheEntry) + valueLen), 0, NULL, NULL);
 	entry->valueLength = (int)valueLen; // No loss of data, becuase it's capped to INT32_MAX
 	if (valueLen > 0) { memcpy_s(entry->value, valueLen, value, valueLen); }
 	if (vhash != NULL)
@@ -168,8 +173,8 @@ void ILibSimpleDataStore_CachedEx(ILibSimpleDataStore dataStore, char* key, size
 		ILibSimpleDataStore_SHA384(value, valueLen, entry->valueHash);   
 	}
 	
-	ILibHashtable_Put(root->cacheTable, NULL, key, (int)keyLen, entry); // No loss of data, becuase capped at INT32_MAX
-	if (vhash != NULL) { ILibMemory_Free(key); }
+        ILibHashtable_Put(root->cacheTable, NULL, key, (int)keyLen, entry); // No loss of data, becuase capped at INT32_MAX
+        if (vhash != NULL) { ILibMemory_Free(key); }
 }
 
 typedef struct ILibSimpleDateStore_JSONCache
@@ -922,19 +927,29 @@ __EXPORT_TYPE int ILibSimpleDataStore_DeleteEx(ILibSimpleDataStore dataStore, ch
 	ILibSimpleDataStore_TableEntry *entry;
 	
 	if (root == NULL) return 0;
-	entry = (ILibSimpleDataStore_TableEntry*)ILibHashtable_Remove(root->keyTable, NULL, key, (int)keyLen); // no dataloss, capped to INT32_MAX
-	if (entry == NULL)
-	{
-		// Check to see if this is a compressed record, before we return an error
-		char *tmpkey = (char*)ILibMemory_SmartAllocate(keyLen + sizeof(uint32_t));
-		memcpy_s(tmpkey, ILibMemory_Size(tmpkey), key, keyLen);
-		((uint32_t*)(tmpkey + keyLen))[0] = crc32c(0, (unsigned char*)key, (uint32_t)keyLen); // no dataloss, capped to INT32_MAX
-		entry = (ILibSimpleDataStore_TableEntry*)ILibHashtable_Remove(root->keyTable, NULL, tmpkey, (int)ILibMemory_Size(tmpkey));
-		if (entry != NULL)
-		{
-			if (ILibSimpleDataStore_WriteRecord(root->dataFile, tmpkey, (int)ILibMemory_Size(tmpkey), NULL, 0, NULL) == 0)
-			{
-				if (root->ErrorHandler != NULL) { root->ErrorHandler(root, root->ErrorHandlerUser); }
+        entry = (ILibSimpleDataStore_TableEntry*)ILibHashtable_Remove(root->keyTable, NULL, key, (int)keyLen); // no dataloss, capped to INT32_MAX
+        if (root->cacheTable != NULL)
+        {
+                ILibSimpleDataStore_CacheEntry *centry = (ILibSimpleDataStore_CacheEntry*)ILibHashtable_Remove(root->cacheTable, NULL, key, (int)keyLen);
+                if (centry != NULL) { free(centry); }
+        }
+        if (entry == NULL)
+        {
+                // Check to see if this is a compressed record, before we return an error
+                char *tmpkey = (char*)ILibMemory_SmartAllocate(keyLen + sizeof(uint32_t));
+                memcpy_s(tmpkey, ILibMemory_Size(tmpkey), key, keyLen);
+                ((uint32_t*)(tmpkey + keyLen))[0] = crc32c(0, (unsigned char*)key, (uint32_t)keyLen); // no dataloss, capped to INT32_MAX
+                entry = (ILibSimpleDataStore_TableEntry*)ILibHashtable_Remove(root->keyTable, NULL, tmpkey, (int)ILibMemory_Size(tmpkey));
+                if (root->cacheTable != NULL)
+                {
+                        ILibSimpleDataStore_CacheEntry *centry = (ILibSimpleDataStore_CacheEntry*)ILibHashtable_Remove(root->cacheTable, NULL, tmpkey, (int)ILibMemory_Size(tmpkey));
+                        if (centry != NULL) { free(centry); }
+                }
+                if (entry != NULL)
+                {
+                        if (ILibSimpleDataStore_WriteRecord(root->dataFile, tmpkey, (int)ILibMemory_Size(tmpkey), NULL, 0, NULL) == 0)
+                        {
+                                if (root->ErrorHandler != NULL) { root->ErrorHandler(root, root->ErrorHandlerUser); }
 			}
 			free(entry);
 			ILibMemory_Free(tmpkey);

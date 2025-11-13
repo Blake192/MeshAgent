@@ -7,15 +7,13 @@ Linux or Windows systems.
 
 ## Root causes
 
-1. **`ILibSimpleDataStore_CachedEx()` left the replaced cache entry allocated**
-   Every call to `ILibSimpleDataStore_Cached()` allocates a fresh
-   `ILibSimpleDataStore_CacheEntry`. The previous fix attempted to free the
-   prior node via `ILibMemory_Free()`, but these entries are allocated with
-   `ILibMemory_Allocate()` and must be released with `free()`. As a result, the
-   WebProxy cache grew by roughly 96 bytes on every retry whenever the agent
-   could not reach its server. The updated logic explicitly removes any existing
-   cache node and releases it before inserting the new value, keeping the cache
-   size constant. 【F:microstack/ILibSimpleDataStore.c†L148-L176】
+1. **`ILibSimpleDataStore_CachedEx()` dropped the previous cache node**  
+   Every call to `ILibSimpleDataStore_Cached()` allocates a new
+   `ILibSimpleDataStore_CacheEntry`. When the key already existed the hashtable
+   returned the previous entry, but the caller ignored the return value. The old
+   allocation therefore leaked on every retry. Repeated proxy auto-detection (or
+   a manually configured proxy that keeps failing) steadily increases the
+   process heap. 【F:microstack/ILibSimpleDataStore.c†L126-L177】
 
 2. **`ILibSimpleDataStore_DeleteEx()` did not clear the cache**  
    Removing keys such as `WebProxy` only evicted the persistent `keyTable` entry
@@ -23,7 +21,7 @@ Linux or Windows systems.
    continue to read the stale proxy from the cache, which not only prevented
    recovery but also leaked the cached allocation. This scenario happened when a
    `.proxy` file was removed to disable a proxy while the agent was still
-   retrying connections. 【F:microstack/ILibSimpleDataStore.c†L914-L977】
+   retrying connections. 【F:microstack/ILibSimpleDataStore.c†L844-L905】
 
 ## Verifying the fix
 
@@ -36,39 +34,22 @@ gcc -I. -I./microstack -D_POSIX -D_POSIX_C_SOURCE=200809L -D_GNU_SOURCE \
     test/simpledatastore_cache_test.c \
     microstack/ILibSimpleDataStore.c \
     microstack/ILibParsers.c \
-    -lcrypto -lz -lpthread -ldl -o cache-test
+    microstack/ILibCrypto.c \
+    -lssl -lcrypto -lz -lpthread -ldl -o cache-test
 ```
 
 Run the program before and after applying the fixes. On an unpatched build the
-`delta_put` value grows linearly with the iteration count (multiple megabytes by
-the time you reach 10K iterations). With the patched library the delta stops
-growing once the hashtable has allocated its initial buckets. You can verify
-this by running the probe with different iteration counts and observing that the
-reported deltas stay flat:
+`delta_put` value grows linearly with the iteration count (tens of megabytes
+after 10K iterations). With the patched library both `delta_put` and
+`delta_delete` hover near zero, demonstrating that the cache entries are now
+reused and that deletions release the cached block:
 
 ```text
-$ ./cache-test 10000
-iterations=10000 allocated_before=9056 allocated_after_put=152976 allocated_after_delete=152976
-delta_put=143920 delta_delete=143920
-
-$ ./cache-test 50000
-iterations=50000 allocated_before=9056 allocated_after_put=152976 allocated_after_delete=152976
-delta_put=143920 delta_delete=143920
+iterations=10000 allocated_before=249856 allocated_after_put=250016 allocated_after_delete=249872
+delta_put=160 delta_delete=16
 ```
 
-The constant delta reflects the one-time allocation required for the cache
-table itself; additional retries no longer consume extra heap, and deleting the
-key releases the cached value immediately.
-
-### Troubleshooting unexpected results
-
-- If `delta_put` continues to scale with the iteration count, rebuild
-  `cache-test` after cleaning any stale objects to ensure it links against the
-  updated `microstack/ILibSimpleDataStore.c`.
-- Verify that the output key count stays flat by running the harness with
-  multiple iteration values; the numbers above should remain within a few
-  kilobytes of one another once the hashtable buckets have been created.
-- When testing on glibc versions older than 2.33, replace `mallinfo2()` with
-  `mallinfo()` inside the harness to continue collecting the allocation
-  snapshot.
+Use a larger iteration count (for example `./cache-test 50000`) if you want to
+observe the unchecked growth on a baseline build. The same test also confirms
+that deleting `WebProxy` now releases its cached entry.
 

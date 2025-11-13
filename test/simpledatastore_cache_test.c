@@ -17,68 +17,9 @@ limitations under the License.
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <ctype.h>
 #include <malloc.h>
-#include <stdint.h>
-#include <openssl/sha.h>
 
 #include "microstack/ILibSimpleDataStore.h"
-
-#ifndef CRYPTO_MEM_CHECK_ON
-#define CRYPTO_MEM_CHECK_ON 0
-#endif
-#ifndef CRYPTO_mem_ctrl
-#define CRYPTO_mem_ctrl(x) (0)
-#endif
-
-// The cache-only exercise paths do not need compression or CRC helpers, so we
-// provide lightweight stubs here to avoid pulling in the full microscript
-// implementation when building the probe standalone.
-uint32_t crc32c(uint32_t crc, const unsigned char *buf, uint32_t len)
-{
-        (void)crc;
-        (void)buf;
-        (void)len;
-        return 0;
-}
-
-int ILibInflate(char *buffer, size_t bufferLen, char *decompressed, size_t *decompressedLen, uint32_t expectedCrc)
-{
-        (void)buffer;
-        (void)bufferLen;
-        (void)decompressed;
-        (void)decompressedLen;
-        (void)expectedCrc;
-        return 0;
-}
-
-int ILibDeflate(char *buffer, size_t bufferLen, char *compressed, size_t *compressedLen, uint32_t *computedCrc)
-{
-        (void)buffer;
-        (void)bufferLen;
-        (void)compressed;
-        (void)compressedLen;
-        (void)computedCrc;
-        return 1;
-}
-
-void util_sha384(char *data, size_t datalen, char *result)
-{
-        SHA384((unsigned char*)data, datalen, (unsigned char*)result);
-}
-
-void util_hexToBuf(char* hex, int hexLen, char* buf)
-{
-        int outIndex = 0;
-        for (int i = 0; i < hexLen; i += 2)
-        {
-                int hi = toupper((unsigned char)hex[i]);
-                int lo = (i + 1 < hexLen) ? toupper((unsigned char)hex[i + 1]) : '0';
-                hi = (hi >= 'A') ? (hi - 'A' + 10) : (hi - '0');
-                lo = (lo >= 'A') ? (lo - 'A' + 10) : (lo - '0');
-                buf[outIndex++] = (char)((hi << 4) | (lo & 0xF));
-        }
-}
 
 #if defined(__GLIBC__) && ((__GLIBC__ > 2) || (__GLIBC__ == 2 && __GLIBC_MINOR__ >= 33))
 static size_t get_allocated_bytes()
